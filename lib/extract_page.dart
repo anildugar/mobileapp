@@ -205,7 +205,6 @@ class _ExtractPageState extends State<ExtractPage> {
           decoded['candidates'][0]['content']['parts'].isNotEmpty &&
           decoded['candidates'][0]['content']['parts'][0]['text'] != null) {
         extractedText = decoded['candidates'][0]['content']['parts'][0]['text'];
-        print(extractedText);
         // Parse the extracted text and update _extractedData
         _parseExtractedData(extractedText);
       } else {
@@ -412,37 +411,86 @@ class InvoiceDetailsView extends StatelessWidget {
 
     // Payment Summary Section
     sections.add(_buildSectionHeader("Payment Summary"));
-    if (extractedData.containsKey("IGST") && extractedData["IGST"] != null && extractedData["IGST"] != "N/A") {
-      sections.add(_buildTextView(
-          "IGST", extractedData["IGST"].toString(),
-          fontSize: 16));
-    }
+    // Horizontal alignment for CGST and SGST
+    sections.add(
+      Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          if (extractedData.containsKey("CGST") &&
+              extractedData["CGST"] != null &&
+              extractedData["CGST"] != "N/A")
+            Expanded(
+              child: _buildTextView(
+                "CGST",
+                extractedData["CGST"].toString(),
+                fontSize: 16,
+                placeholder: "N/A",
+              ),
+            ),
+          SizedBox(width: 8), // Add some spacing between the fields
+          if (extractedData.containsKey("SGST") &&
+              extractedData["SGST"] != null &&
+              extractedData["SGST"] != "N/A")
+            Expanded(
+              child: _buildTextView(
+                "SGST",
+                extractedData["SGST"].toString(),
+                fontSize: 16,
+                placeholder: "N/A",
+              ),
+            ),
+        ],
+      ),
+    );
 
-    if (extractedData.containsKey("CGST") && extractedData["CGST"] != null && extractedData["CGST"] != "N/A") {
-      sections.add(_buildTextView(
-          "CGST", extractedData["CGST"].toString(),
-          fontSize: 16, placeholder: "N/A"));
-    }
+    // Horizontal alignment for TCS and RoundOff
+    sections.add(
+      Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          if (extractedData.containsKey("TCS") &&
+              extractedData["TCS"] != null &&
+              extractedData["TCS"] != "N/A")
+            Expanded(
+              child: _buildTextView(
+                "TCS",
+                extractedData["TCS"].toString(),
+                fontSize: 16,
+                placeholder: "N/A",
+              ),
+            ),
+          SizedBox(width: 8), // Add some spacing between the fields
+          if (extractedData.containsKey("RoundOff") &&
+              extractedData["RoundOff"] != null &&
+              extractedData["RoundOff"] != "N/A")
+            Expanded(
+              child: _buildTextView(
+                "Round Off",
+                extractedData["RoundOff"].toString(),
+                fontSize: 16,
+              ),
+            ),
+        ],
+      ),
+    );
 
-    if (extractedData.containsKey("SGST") && extractedData["SGST"] != null && extractedData["SGST"] != "N/A") {
-      sections.add(_buildTextView(
-          "SGST", extractedData["SGST"].toString(),
-          fontSize: 16, placeholder: "N/A"));
-    }
-    if (extractedData.containsKey("TCS") && extractedData["TCS"] != null && extractedData["TCS"] != "N/A") {
-      sections.add(_buildTextView(
-          "TCS", extractedData["TCS"].toString(),
-          fontSize: 16, placeholder: "N/A"));
-    }
-
-    if (extractedData.containsKey("RoundOff") && extractedData["RoundOff"] != null && extractedData["RoundOff"] != "N/A") {
-      sections.add(_buildTextView(
-          "Round Off", extractedData["RoundOff"].toString(),
-          fontSize: 16));
-    }
-    sections.add(_buildTextView(
-        "Total Amount", extractedData.containsKey("TotalAmount") ? extractedData["TotalAmount"] : "N/A",
-        fontSize: 20, fontWeight: FontWeight.bold, color: Colors.green));
+    // Center alignment for Total Amount
+    sections.add(
+      Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _buildTextView(
+            "Total Amount",
+            extractedData.containsKey("TotalAmount")
+                ? extractedData["TotalAmount"]
+                : "N/A",
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: Colors.green,
+          ),
+        ],
+      ),
+    );
 
     return sections;
   }
