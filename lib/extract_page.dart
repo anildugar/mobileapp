@@ -1,134 +1,16 @@
+// filepath: lib/extract_page.dart
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/services.dart' show rootBundle;
-import 'package:receive_sharing_intent/receive_sharing_intent.dart';
-
-//import 'package:permission_handler/permission_handler.dart';
-
-
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-      ),
-      home: const MainNavigation(),
-    );
-  }
-}
-
-class MainNavigation extends StatefulWidget {
-  const MainNavigation({super.key});
-
-  @override
-  State<MainNavigation> createState() => _MainNavigationState();
-}
-
-class _MainNavigationState extends State<MainNavigation> {
-  int _selectedIndex = 0;
-
-  static const List<Widget> _pages = <Widget>[
-    MyHomePage(title: 'Home'),
-    ExtractPage(),
-    AccountingPage(),
-  ];
-
-  static const List<String> _titles = [
-    'Home',
-    'Extract',
-    'Accounting',
-  ];
-
-  void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: Text(_titles[_selectedIndex]),
-      ),
-      body: _pages[_selectedIndex],
-      bottomNavigationBar: BottomNavigationBar(
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.document_scanner),
-            label: 'Extract',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.account_balance),
-            label: 'Accounting',
-          ),
-        ],
-        currentIndex: _selectedIndex,
-        selectedItemColor: Theme.of(context).colorScheme.primary,
-        onTap: _onItemTapped,
-      ),
-    );
-  }
-}
-
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-  final String title;
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
-
-  void _incrementCounter() {
-    setState(() {
-      _counter++;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: <Widget>[
-          const Text('You have pushed the button this many times:'),
-          Text(
-            '$_counter',
-            style: Theme.of(context).textTheme.headlineMedium,
-          ),
-          const SizedBox(height: 20),
-          FloatingActionButton(
-            onPressed: _incrementCounter,
-            tooltip: 'Increment',
-            child: const Icon(Icons.add),
-          ),
-        ],
-      ),
-    );
-  }
-}
+import 'package:share_handler/share_handler.dart';
+import 'dart:async';
+import 'package:path_provider/path_provider.dart';
 
 class ExtractPage extends StatefulWidget {
-  const ExtractPage({super.key});
+  const ExtractPage({Key? key}) : super(key: key);
 
   @override
   State<ExtractPage> createState() => _ExtractPageState();
@@ -139,43 +21,86 @@ class _ExtractPageState extends State<ExtractPage> {
   String? _pickedFileName;
   String? _pickedFileBase64;
   bool _isLoading = false;
-  StreamSubscription? _intentDataStreamSubscription;
+  SharedMedia? _sharedMedia;
+
+  StreamSubscription? _sharedMediaStreamSubscription;
 
   @override
   void initState() {
     super.initState();
     _loadPromptFromAsset();
-    _handleInitialPdfIntent();
+    _initShareHandler();
+    //_handleInitialPdfIntent();
   }
 
-  Future<void> _handleInitialPdfIntent() async {
-    // Listen for incoming shared files (PDFs)
-    _intentDataStreamSubscription = ReceiveSharingIntent.getMediaStream().listen((List<SharedMediaFile> value) async {
-      if (value.isNotEmpty && value.first.path.toLowerCase().endsWith('.pdf')) {
-        final file = File(value.first.path);
-        final bytes = await file.readAsBytes();
-        setState(() {
-          _pickedFileName = file.path.split(Platform.pathSeparator).last;
-          _pickedFileBase64 = base64Encode(bytes);
-        });
-        // Optionally, auto-submit after receiving the file:
-        // await _onSubmit();
-      }
-    }, onError: (err) {
-      // Handle error if needed
+void _initShareHandler() async {
+    final handler = ShareHandlerPlatform.instance;
+
+    // Get initial shared media (when app is launched by share)
+    _sharedMedia = await handler.getInitialSharedMedia();
+    if (_sharedMedia != null) {
+      _processSharedMedia(_sharedMedia!);
+    }
+
+    // Listen for new shared media (when app is already running)
+    _sharedMediaStreamSubscription = handler.sharedMediaStream.listen((SharedMedia media) {
+      _processSharedMedia(media);
+    });
+  }
+
+void _processSharedMedia(SharedMedia media) async {
+    setState(() {
+      _sharedMedia = media;
     });
 
-    // For app launch with shared file
-    final initialFiles = await ReceiveSharingIntent.getInitialMedia();
-    if (initialFiles.isNotEmpty && initialFiles.first.path.toLowerCase().endsWith('.pdf')) {
-      final file = File(initialFiles.first.path);
-      final bytes = await file.readAsBytes();
-      setState(() {
-        _pickedFileName = file.path.split(Platform.pathSeparator).last;
-        _pickedFileBase64 = base64Encode(bytes);
-      });
-      // Optionally, auto-submit after receiving the file:
-      // await _onSubmit();
+    if (media.attachments != null && media.attachments!.isNotEmpty) {
+      for (var attachment in media.attachments!) {
+        if (attachment?.path != null) { 
+          final String? attachmentPath = attachment?.path;
+
+        print('Received attachment: ${attachment?.path}, type: ${attachment?.type}');
+
+        // Check if it's a PDF
+        if (attachment?.path != null && (attachment?.type == SharedAttachmentType.file)) {
+          if (attachment?.path != null && attachmentPath!.toLowerCase().endsWith('.pdf')) {
+            try {
+              File sharedPdf = File(attachmentPath);
+              if (await sharedPdf.exists()) {
+                final appDocDir = await getApplicationDocumentsDirectory();
+                final newFileName = 'shared_pdf_${DateTime.now().millisecondsSinceEpoch}.pdf';
+                final newFilePath = '${appDocDir.path}/$newFileName';
+
+                await sharedPdf.copy(newFilePath);
+                print('Successfully copied PDF to: $newFilePath');
+
+                setState(() {
+                  _pickedFileName = newFileName;
+                  File newFile = File(newFilePath);
+                  _pickedFileBase64 = base64Encode(newFile.readAsBytesSync());
+                });
+
+                print (_pickedFileBase64);
+                await _onSubmit(); // Optionally, you can call _pickFile() to update the UI
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Received PDF: $newFileName')),
+                );
+                // Open/display PDF from newFilePath
+              } else {
+                print('Error: Shared PDF file does not exist at $attachmentPath');
+              }
+            } catch (e) {
+              print('Error processing shared PDF with share_handler: $e');
+            }
+          }
+        }
+      }
+      }
+    } else if (media.content != null) {
+      print('Received shared text: ${media.content}');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Received Text: ${media.content}')),
+      );
     }
   }
 
@@ -188,7 +113,6 @@ class _ExtractPageState extends State<ExtractPage> {
 
   @override
   void dispose() {
-    _intentDataStreamSubscription?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -328,19 +252,6 @@ class _ExtractPageState extends State<ExtractPage> {
             ),
           ),
       ],
-    );
-  }
-}
-
-class AccountingPage extends StatelessWidget {
-  const AccountingPage({super.key});
-  @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: Text(
-        'Manage your accounting here.',
-        style: TextStyle(fontSize: 20),
-      ),
     );
   }
 }
