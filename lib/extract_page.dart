@@ -22,79 +22,74 @@ class _ExtractPageState extends State<ExtractPage> {
   String? _pickedFileBase64;
   bool _isLoading = false;
   SharedMedia? _sharedMedia;
-
   StreamSubscription? _sharedMediaStreamSubscription;
+  Map<String, dynamic> _extractedData = {}; // Store extracted data here
 
   @override
   void initState() {
     super.initState();
     _loadPromptFromAsset();
     _initShareHandler();
-    //_handleInitialPdfIntent();
   }
 
-void _initShareHandler() async {
+  void _initShareHandler() async {
     final handler = ShareHandlerPlatform.instance;
 
-    // Get initial shared media (when app is launched by share)
     _sharedMedia = await handler.getInitialSharedMedia();
     if (_sharedMedia != null) {
-      _processSharedMedia(_sharedMedia!);
+      await _processSharedMedia(_sharedMedia!);
     }
 
-    // Listen for new shared media (when app is already running)
-    _sharedMediaStreamSubscription = handler.sharedMediaStream.listen((SharedMedia media) {
-      _processSharedMedia(media);
+    _sharedMediaStreamSubscription = handler.sharedMediaStream.listen((SharedMedia media) async {
+      await _processSharedMedia(media);
     });
   }
 
-void _processSharedMedia(SharedMedia media) async {
+  Future<void> _processSharedMedia(SharedMedia media) async {
     setState(() {
       _sharedMedia = media;
     });
 
     if (media.attachments != null && media.attachments!.isNotEmpty) {
       for (var attachment in media.attachments!) {
-        if (attachment?.path != null) { 
+        if (attachment?.path != null) {
           final String? attachmentPath = attachment?.path;
 
-        print('Received attachment: ${attachment?.path}, type: ${attachment?.type}');
+          print('Received attachment: ${attachment?.path}, type: ${attachment?.type}');
 
-        // Check if it's a PDF
-        if (attachment?.path != null && (attachment?.type == SharedAttachmentType.file)) {
-          if (attachment?.path != null && attachmentPath!.toLowerCase().endsWith('.pdf')) {
-            try {
-              File sharedPdf = File(attachmentPath);
-              if (await sharedPdf.exists()) {
-                final appDocDir = await getApplicationDocumentsDirectory();
-                final newFileName = 'shared_pdf_${DateTime.now().millisecondsSinceEpoch}.pdf';
-                final newFilePath = '${appDocDir.path}/$newFileName';
+          if (attachment?.path != null && (attachment?.type == SharedAttachmentType.file)) {
+            if (attachment?.path != null && attachmentPath!.toLowerCase().endsWith('.pdf')) {
+              try {
+                File sharedPdf = File(attachmentPath);
+                if (await sharedPdf.exists()) {
+                  final appDocDir = await getApplicationDocumentsDirectory();
+                  final newFileName = 'shared_pdf_${DateTime.now().millisecondsSinceEpoch}.pdf';
+                  final newFilePath = '${appDocDir.path}/$newFileName';
 
-                await sharedPdf.copy(newFilePath);
-                print('Successfully copied PDF to: $newFilePath');
+                  await sharedPdf.copy(newFilePath);
+                  print('Successfully copied PDF to: $newFilePath');
 
-                setState(() {
-                  _pickedFileName = newFileName;
-                  File newFile = File(newFilePath);
-                  _pickedFileBase64 = base64Encode(newFile.readAsBytesSync());
-                });
+                  setState(() {
+                    _pickedFileName = newFileName;
+                    File newFile = File(newFilePath);
+                    _pickedFileBase64 = base64Encode(newFile.readAsBytesSync());
+                  });
 
-                print (_pickedFileBase64);
-                await _onSubmit(); // Optionally, you can call _pickFile() to update the UI
+                  print(_pickedFileBase64);
+                  await _onSubmit();
 
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Received PDF: $newFileName')),
-                );
-                // Open/display PDF from newFilePath
-              } else {
-                print('Error: Shared PDF file does not exist at $attachmentPath');
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Received PDF: $newFileName')),
+                  );
+                } else {
+                  print('Error: Shared PDF file does not exist at $attachmentPath');
+                }
+              } catch (e) {
+                print('Error processing shared PDF with share_handler: $e');
               }
-            } catch (e) {
-              print('Error processing shared PDF with share_handler: $e');
             }
           }
         }
-      }
       }
     } else if (media.content != null) {
       print('Received shared text: ${media.content}');
@@ -114,6 +109,7 @@ void _processSharedMedia(SharedMedia media) async {
   @override
   void dispose() {
     _controller.dispose();
+    _sharedMediaStreamSubscription?.cancel();
     super.dispose();
   }
 
@@ -144,7 +140,37 @@ void _processSharedMedia(SharedMedia media) async {
             },
             {
               "text":
-                  "If the invoice is valid, then extract the following details : From (Name, Address, GSTIN/UIN), To (Name, Address, GSTIN/UIN), Dispatch From, Ship To, Invoice No, e-Way Bill No, Invoice Date (Dated), Motor Vehicle No, GoodsDetails (S.N., Description, HSN Code, Qty, Unit, A.Qty, A.Unit, Packing, Price, CGST Rate, CGST Amount, SGST Rate, SGST Amount, Amount), CGST, SGST, Tcs, RoundOff, and Total amount."
+                  """ If the invoice is valid, extract the following details and **standardize the key names as specified below**:
+
+**From** (object with keys: Name, Address, GSTIN/UIN)
+**To** (object with keys: Name, Address, GSTIN/UIN)
+**DispatchFrom** (string)
+**ShipTo** (string)
+**InvoiceNo** (string)
+**e-WayBillNo** (string)
+**InvoiceDate** (string, extracted from 'Dated')
+**MotorVehicleNo** (string)
+**GoodsDetails** (array of objects, each with the following standardized keys):
+  * **SN** (number, for 'S.N.')
+  * **Description** (string)
+  * **HSNCode** (string, for 'HSN Code')
+  * **Quantity** (number, for 'Qty')
+  * **Unit** (string)
+  * **ActualQuantity** (number, for 'A.Qty', or null if not present)
+  * **ActualUnit** (string, for 'A.Unit', or null if not present)
+  * **Packing** (string, or null if not present)
+  * **PriceRate** (number, for 'Price', 'Rate', 'Price/Rate', or 'PRice/Rate')
+  * **CGSTRate** (string, for 'CGST Rate', or null if not present)
+  * **CGSTAmount** (number, for 'CGST Amount', or null if not present)
+  * **SGSTRate** (string, for 'SGST Rate', or null if not present)
+  * **SGSTAmount** (number, for 'SGST Amount', or null if not present)
+  * **TotalItemAmount** (number, for 'Total' or 'Amount' of individual item)
+**CGST** (number, or null if not present)
+**SGST** (number, or null if not present)
+**IGST** (number, or null if not present)
+**TCS** (number, or null if not present)
+**RoundOff** (number)
+**TotalAmount** (number, for 'Total' or 'Total/Amount')"""
             },
             {
               "inlineData": {
@@ -168,9 +194,8 @@ void _processSharedMedia(SharedMedia media) async {
         body: jsonEncode(body),
       );
 
-      // Parse the response and extract only the required text
       final decoded = jsonDecode(response.body);
-      String? extractedText;
+      String extractedText;
       if (decoded['candidates'] != null &&
           decoded['candidates'] is List &&
           decoded['candidates'].isNotEmpty &&
@@ -180,12 +205,15 @@ void _processSharedMedia(SharedMedia media) async {
           decoded['candidates'][0]['content']['parts'].isNotEmpty &&
           decoded['candidates'][0]['content']['parts'][0]['text'] != null) {
         extractedText = decoded['candidates'][0]['content']['parts'][0]['text'];
+        print(extractedText);
+        // Parse the extracted text and update _extractedData
+        _parseExtractedData(extractedText);
       } else {
         extractedText = "No valid response found.";
       }
 
       setState(() {
-        _controller.text = extractedText!;
+        _controller.text = extractedText;
         _isLoading = false;
       });
     } catch (e) {
@@ -193,6 +221,47 @@ void _processSharedMedia(SharedMedia media) async {
         _controller.text = "Error: $e";
         _isLoading = false;
       });
+    }
+  }
+
+  // Helper function to parse the extracted data
+  void _parseExtractedData(String extractedText) {
+    try {
+      // Assuming the extracted text is in JSON format
+      Map<String, dynamic> parsedData = jsonDecode(extractedText);
+
+      // Extract the extracted_data part
+      if (parsedData.containsKey('invoiceDetails')) {
+        setState(() {
+           print(parsedData['invoiceDetails']);
+          _extractedData = parsedData['invoiceDetails'] as Map<String, dynamic>;
+        });
+      } else {
+        print('Error: invoiceDetails key not found in JSON response');
+      }
+    } catch (e) {
+      print('Error parsing extracted data: $e');
+      // Handle the error appropriately (e.g., show an error message)
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("Invoice Details"),
+      ),
+      body: _extractedData.isNotEmpty
+          ? InvoiceDetailsView(extractedData: _extractedData)
+          : _buildLoadingOrEmptyView(),
+    );
+  }
+
+  Widget _buildLoadingOrEmptyView() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    } else {
+      return const Center(child: Text("No invoice data to display."));
     }
   }
 
@@ -208,50 +277,208 @@ void _processSharedMedia(SharedMedia media) async {
       });
     }
   }
+}
+
+class InvoiceDetailsView extends StatelessWidget {
+  final Map<String, dynamic> extractedData;
+
+  const InvoiceDetailsView({Key? key, required this.extractedData}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              TextField(
-                controller: _controller,
-                maxLines: 10,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                  labelText: 'Enter your text here',
+    return SingleChildScrollView(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: _buildSections(context),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildSections(BuildContext context) {
+    List<Widget> sections = [];
+
+    // Invoice Overview Section
+    sections.add(_buildSectionHeader("Invoice Overview"));
+    sections.add(_buildTextView(
+        "Invoice No.", extractedData.containsKey("InvoiceNo") ? extractedData["InvoiceNo"] : "N/A",
+        fontSize: 18, fontWeight: FontWeight.bold));
+    sections.add(_buildTextView(
+        "Invoice Date", extractedData.containsKey("InvoiceDate") ? extractedData["InvoiceDate"] : "N/A",
+        fontSize: 16,fontWeight: FontWeight.bold));
+    sections.add(_buildTextView(
+        "e-Way Bill No.", extractedData.containsKey("e-WayBillNo") ? extractedData["e-WayBillNo"] : "N/A",
+        fontSize: 16,fontWeight: FontWeight.bold, placeholder: "N/A"));
+
+    // Seller Details Section
+    sections.add(_buildSectionHeader("Seller Details"));
+    // Access "From" object and its properties
+    final from = extractedData['From'] as Map<String, dynamic>?;
+    final fromName = from?['Name']?.toString() ?? "N/A";
+    final fromAddress = from?['Address']?.toString() ?? "N/A";
+    final fromGstin = from?['GSTIN/UIN']?.toString() ?? "N/A";
+
+    sections.add(_buildTextView(
+        "From", fromName,
+        fontSize: 16, fontWeight: FontWeight.bold));
+    sections.add(_buildTextView(
+        "Address", fromAddress,
+        fontSize: 14,fontWeight: FontWeight.bold, multiline: true));
+    sections.add(_buildTextView(
+        "GSTIN/UIN", fromGstin,
+        fontSize: 14, fontWeight: FontWeight.bold));
+
+    // Buyer Details Section
+    sections.add(_buildSectionHeader("Buyer Details"));
+    final to = extractedData['To'] as Map<String, dynamic>?;
+    final toName = to?['Name']?.toString() ?? "N/A";
+    final toAddress = to?['Address']?.toString() ?? "N/A";
+    final toGstin = to?['GSTIN/UIN']?.toString() ?? "N/A";
+
+    sections.add(_buildTextView(
+        "To", toName,
+        fontSize: 16, fontWeight: FontWeight.bold));
+    sections.add(_buildTextView(
+        "Address", toAddress,
+        fontSize: 14,fontWeight: FontWeight.bold, multiline: true));
+    sections.add(_buildTextView(
+        "GSTIN/UIN", toGstin,
+        fontSize: 14, fontWeight: FontWeight.bold));
+
+    // Dispatch & Shipping Section
+    sections.add(_buildSectionHeader("Dispatch & Shipping"));
+    sections.add(_buildTextView(
+        "Dispatch From", extractedData.containsKey("DispatchFrom") ? extractedData["DispatchFrom"] : "N/A",
+        fontSize: 14,fontWeight: FontWeight.bold));
+    sections.add(_buildTextView(
+        "Ship To", extractedData.containsKey("ShipTo") ? extractedData["ShipTo"] : "N/A",
+        fontSize: 14, fontWeight: FontWeight.bold));
+    sections.add(_buildTextView(
+        "Motor Vehicle No.", extractedData.containsKey("MotorVehicleNo") ? extractedData["MotorVehicleNo"] : "N/A",
+        fontSize: 14, fontWeight: FontWeight.bold, placeholder: "N/A"));
+
+    // Items Purchased Section
+    sections.add(_buildSectionHeader("Items Purchased"));
+    if (extractedData.containsKey("GoodsDetails") &&
+        extractedData["GoodsDetails"] is List) {
+      List<dynamic> items = extractedData["GoodsDetails"];
+      sections.add(
+        ListView.builder(
+          shrinkWrap: true,
+          physics: NeverScrollableScrollPhysics(),
+          itemCount: items.length,
+          itemBuilder: (context, index) {
+            final item = items[index];
+            return Card(
+              margin: EdgeInsets.symmetric(vertical: 4),
+              child: Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.containsKey("Description") ? item["Description"] : "N/A",
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          "Qty: ${item.containsKey("Quantity") ? item["Quantity"] : "N/A"}",
+                          style: TextStyle(fontSize: 12),
+                        ),
+                        Text(
+                          "Rate: ${item.containsKey("PriceRate") ? item["PriceRate"] : "N/A"}",
+                          style: TextStyle(fontSize: 12),
+                        ),
+                        Text(
+                          "Amount: ${item.containsKey("TotalItemAmount") ? item["TotalItemAmount"] : "N/A"}",
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 20),
-              ElevatedButton.icon(
-                onPressed: _pickFile,
-                icon: const Icon(Icons.attach_file),
-                label: const Text('Pick a File'),
-              ),
-              if (_pickedFileName != null) ...[
-                const SizedBox(height: 10),
-                Text('Selected file: $_pickedFileName'),
-              ],
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: _isLoading ? null : _onSubmit,
-                child: const Text('Submit'),
-              ),
-            ],
-          ),
+            );
+          },
         ),
-        if (_isLoading)
-          Container(
-            color: Colors.black.withOpacity(0.3),
-            child: const Center(
-              child: CircularProgressIndicator(),
-            ),
+      );
+    } else {
+      sections.add(const Text("No items purchased data available."));
+    }
+
+    // Payment Summary Section
+    sections.add(_buildSectionHeader("Payment Summary"));
+    if (extractedData.containsKey("IGST") && extractedData["IGST"] != null && extractedData["IGST"] != "N/A") {
+      sections.add(_buildTextView(
+          "IGST", extractedData["IGST"].toString(),
+          fontSize: 16));
+    }
+
+    if (extractedData.containsKey("CGST") && extractedData["CGST"] != null && extractedData["CGST"] != "N/A") {
+      sections.add(_buildTextView(
+          "CGST", extractedData["CGST"].toString(),
+          fontSize: 16, placeholder: "N/A"));
+    }
+
+    if (extractedData.containsKey("SGST") && extractedData["SGST"] != null && extractedData["SGST"] != "N/A") {
+      sections.add(_buildTextView(
+          "SGST", extractedData["SGST"].toString(),
+          fontSize: 16, placeholder: "N/A"));
+    }
+    if (extractedData.containsKey("TCS") && extractedData["TCS"] != null && extractedData["TCS"] != "N/A") {
+      sections.add(_buildTextView(
+          "TCS", extractedData["TCS"].toString(),
+          fontSize: 16, placeholder: "N/A"));
+    }
+
+    if (extractedData.containsKey("RoundOff") && extractedData["RoundOff"] != null && extractedData["RoundOff"] != "N/A") {
+      sections.add(_buildTextView(
+          "Round Off", extractedData["RoundOff"].toString(),
+          fontSize: 16));
+    }
+    sections.add(_buildTextView(
+        "Total Amount", extractedData.containsKey("TotalAmount") ? extractedData["TotalAmount"] : "N/A",
+        fontSize: 20, fontWeight: FontWeight.bold, color: Colors.green));
+
+    return sections;
+  }
+
+  Widget _buildSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 16.0, bottom: 8.0),
+      child: Text(
+        title,
+        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  Widget _buildTextView(String label, dynamic value,
+      {double fontSize = 14,
+      FontWeight? fontWeight,
+      String? placeholder,
+      Color? color,
+      bool multiline = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(fontSize: fontSize, fontWeight: fontWeight),
           ),
-      ],
+          Text(
+            (value != null ? value.toString() : (placeholder ?? "N/A")),
+            style: TextStyle(fontSize: fontSize, color: color),
+            maxLines: multiline ? null : 1,
+          ),
+        ],
+      ),
     );
   }
 }
